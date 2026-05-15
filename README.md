@@ -39,7 +39,6 @@
 - 支持按文件名自动识别处理器
 - 支持字节数组和流式处理
 - 支持水印文字、透明度、字号、颜色、旋转角度、位置配置
-- 默认不提供 REST 接口，便于业务系统自行控制文件上传、下载和权限
 - Excel 默认锁定水印图片并保护工作表，降低水印被误删或拖动的概率
 
 ## 模块结构
@@ -402,14 +401,6 @@ mvn clean package
 - [Apache PDFBox](https://pdfbox.apache.org/) - PDF 文档处理
 - [Project Lombok](https://projectlombok.org/) - Java 样板代码简化
 - [JUnit 5](https://junit.org/junit5/) - 单元测试与集成测试
-
-## 后续规划
-
-- 优化 PDF 水印图层缓存和文件体积
-- 支持 `.xls` 和 `.doc`
-- 支持更多水印布局策略
-- 支持按文件类型单独定制水印参数
-- 增加更多真实文件集成测试样例
 
 ---
 
