@@ -31,6 +31,10 @@ public class WatermarkProperties {
 
     private String fontPath = WatermarkOptions.DEFAULT_FONT_PATH;
 
+    private Boolean excelProtectSheet = WatermarkOptions.DEFAULT_EXCEL_PROTECT_SHEET;
+
+    private String excelProtectPassword = WatermarkOptions.DEFAULT_EXCEL_PROTECT_PASSWORD;
+
     /**
      * 将 Spring Boot 外部化配置转换为 core 模块使用的水印参数。
      *
@@ -46,6 +50,8 @@ public class WatermarkProperties {
                 .rotation(rotation)
                 .position(position)
                 .fontPath(fontPath)
+                .excelProtectSheet(excelProtectSheet)
+                .excelProtectPassword(excelProtectPassword)
                 .build()
                 // 外部配置可能省略或传入非法字段，绑定后必须再次归一化。
                 .normalize();

@@ -37,9 +37,10 @@ public class ExcelWatermarkHandler implements WatermarkHandler {
     private static final int MIN_SHEET_WIDTH_PIXELS = 800;
     private static final int MIN_SHEET_HEIGHT_PIXELS = 600;
     private static final int SHEET_BOTTOM_PADDING_PIXELS = 50;
+    private static final int MAX_WATERMARK_IMAGE_WIDTH_PIXELS = 4096;
+    private static final int MAX_WATERMARK_IMAGE_HEIGHT_PIXELS = 4096;
     private static final int FIRST_ROW_INDEX = 0;
     private static final int FIRST_COLUMN_INDEX = 0;
-    private static final String DEFAULT_PROTECT_PASSWORD = "watermark";
 
     private final WatermarkImageFactory imageFactory;
 
@@ -91,8 +92,9 @@ public class ExcelWatermarkHandler implements WatermarkHandler {
     private void addWatermarkToSheet(XSSFWorkbook workbook, XSSFSheet sheet, WatermarkOptions options) throws Exception {
         // 先计算工作表像素尺寸，确保生成的水印图层覆盖已使用区域。
         Dimension size = calculateSheetPixelSize(sheet);
+        Dimension renderSize = limitRenderSize(size);
         // 跨模块调用图片水印渲染器，保证 Excel 与图片水印文字样式一致。
-        BufferedImage watermarkImage = imageFactory.createWatermarkImage(options, size.width, size.height);
+        BufferedImage watermarkImage = imageFactory.createWatermarkImage(scaleOptions(options, renderSize, size), renderSize.width, renderSize.height);
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
         // PNG 能保留 Excel 水印叠加所需的透明背景。
         ImageIO.write(watermarkImage, "png", buffer);
@@ -105,25 +107,75 @@ public class ExcelWatermarkHandler implements WatermarkHandler {
         XSSFClientAnchor anchor = createAnchor(sheet);
         // 图片字节和锚点都准备好后再创建图片，因为 POI 会在构造时绑定二者。
         XSSFPicture picture = drawing.createPicture(anchor, pictureIndex);
-        // 锁定图片对象并保护工作表，避免用户在普通编辑状态下选中、拖动或删除水印。
-        lockWatermarkPicture(sheet, picture);
+        // 锁定图片对象，并按配置保护未受保护的工作表，降低水印被误删或拖动的概率。
+        lockWatermarkPicture(sheet, picture, options);
     }
 
     /**
-     * 锁定水印图片并保护工作表，降低水印被鼠标误删或拖动的概率。
+     * 锁定水印图片，并按配置保护未受保护的工作表，降低水印被鼠标误删或拖动的概率。
      *
      * @param sheet 目标工作表
      * @param picture 已插入的水印图片
+     * @param options 已归一化的水印参数
      */
-    private void lockWatermarkPicture(XSSFSheet sheet, XSSFPicture picture) {
+    private void lockWatermarkPicture(XSSFSheet sheet, XSSFPicture picture, WatermarkOptions options) {
         // 图片锁用于限制 Excel UI 对形状的直接编辑；真正生效还依赖工作表保护。
         picture.getCTPicture().getNvPicPr().getCNvPicPr().addNewPicLocks().setNoChangeAspect(true);
         // 禁止调整形状大小，避免用户取消保护前水印被误缩放导致覆盖范围变化。
         picture.getCTPicture().getNvPicPr().getCNvPicPr().getPicLocks().setNoChangeArrowheads(true);
+        if (!Boolean.TRUE.equals(options.getExcelProtectSheet()) || sheet.getProtect()) {
+            return;
+        }
         // 保护工作表后，锁定对象在普通编辑模式下不能被选中拖动或删除。
-        sheet.protectSheet(DEFAULT_PROTECT_PASSWORD);
+        sheet.protectSheet(options.getExcelProtectPassword());
         // 明确锁定对象编辑权限，避免不同 Excel 版本对默认保护项理解不一致。
         sheet.lockObjects(true);
+    }
+
+    /**
+     * 限制透明水印图层实际渲染尺寸，避免超大工作表生成过大的 PNG。
+     *
+     * @param size 工作表估算像素尺寸
+     * @return 实际用于渲染 PNG 的尺寸
+     */
+    private Dimension limitRenderSize(Dimension size) {
+        double scale = Math.min(
+                (double) MAX_WATERMARK_IMAGE_WIDTH_PIXELS / Math.max(size.width, 1),
+                (double) MAX_WATERMARK_IMAGE_HEIGHT_PIXELS / Math.max(size.height, 1)
+        );
+        if (scale >= 1d) {
+            return size;
+        }
+        return new Dimension(
+                Math.max(1, (int) Math.round(size.width * scale)),
+                Math.max(1, (int) Math.round(size.height * scale))
+        );
+    }
+
+    /**
+     * 按 PNG 渲染尺寸相对锚点覆盖尺寸缩放字号。
+     *
+     * @param options 已归一化的水印参数
+     * @param renderSize 实际渲染尺寸
+     * @param targetSize 最终锚点覆盖尺寸
+     * @return 适用于 PNG 图层的水印参数副本
+     */
+    private WatermarkOptions scaleOptions(WatermarkOptions options, Dimension renderSize, Dimension targetSize) {
+        double scale = Math.min(
+                (double) renderSize.width / Math.max(targetSize.width, 1),
+                (double) renderSize.height / Math.max(targetSize.height, 1)
+        );
+        return WatermarkOptions.builder()
+                .text(options.getText())
+                .opacity(options.getOpacity())
+                .fontSize(Math.max(1, (int) Math.round(options.getFontSize() * scale)))
+                .color(options.getColor())
+                .rotation(options.getRotation())
+                .position(options.getPosition())
+                .fontPath(options.getFontPath())
+                .excelProtectSheet(options.getExcelProtectSheet())
+                .excelProtectPassword(options.getExcelProtectPassword())
+                .build();
     }
 
     /**
