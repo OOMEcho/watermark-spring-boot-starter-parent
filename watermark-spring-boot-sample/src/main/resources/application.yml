@@ -1,0 +1,17 @@
+watermark:
+  enabled: true
+  text: sample watermark
+  opacity: 0.3
+  font-size: 40
+  color: GRAY
+  rotation: 45
+  position: DIAGONAL
+  font-path: classpath:/fonts/SourceHanSerifSC-Regular.otf
+  excel-protect-sheet: true
+  excel-protect-password: watermark
+
+sample:
+# 示例应用默认不处理文件。运行时通过命令行参数覆盖以下配置。
+#  input: D:/temp/demo.pdf
+#  output: D:/temp/demo-watermarked.pdf
+#  file-name: demo.pdf

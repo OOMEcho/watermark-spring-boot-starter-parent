@@ -16,6 +16,7 @@
         <module>watermark-core</module>
         <module>watermark-spring-boot-autoconfigure</module>
         <module>watermark-spring-boot-starter</module>
+        <module>watermark-spring-boot-sample</module>
     </modules>
 
     <properties>

@@ -49,7 +49,8 @@ watermark-spring-boot-starter-parent/
 ├── pom.xml
 ├── watermark-core/
 ├── watermark-spring-boot-autoconfigure/
-└── watermark-spring-boot-starter/
+├── watermark-spring-boot-starter/
+└── watermark-spring-boot-sample/
 ```
 
 | 模块 | 说明 |
@@ -57,6 +58,7 @@ watermark-spring-boot-starter-parent/
 | `watermark-core` | 核心水印能力，不依赖 Spring |
 | `watermark-spring-boot-autoconfigure` | Spring Boot 自动配置模块 |
 | `watermark-spring-boot-starter` | 业务项目直接引入的 starter 聚合模块 |
+| `watermark-spring-boot-sample` | 最小 Spring Boot 使用示例 |
 
 ## 环境要求
 
@@ -220,6 +222,18 @@ try (InputStream input = Files.newInputStream(Paths.get("D:/temp/demo.pdf"));
     watermarkService.addWatermark(input, output, "demo.pdf");
 }
 ```
+
+### 运行示例模块
+
+项目提供了一个最小 Spring Boot 示例模块 `watermark-spring-boot-sample`，用于验证 starter 自动装配和 `WatermarkService` 注入流程。示例应用不提供 Controller，只通过 `CommandLineRunner` 读取本地文件并输出水印文件。
+
+未传入 `sample.input` 时，示例应用只启动并打印提示，不会处理文件。
+
+```powershell
+mvn -pl watermark-spring-boot-sample spring-boot:run "-Dspring-boot.run.arguments=--sample.input=D:/temp/demo.pdf,--sample.output=D:/temp/demo-watermarked.pdf,--sample.file-name=demo.pdf"
+```
+
+如果不指定 `sample.output`，输出文件会默认生成在输入文件同目录，并在原文件名后追加 `-watermarked`。
 
 ## 支持格式
 
