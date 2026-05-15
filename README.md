@@ -222,7 +222,7 @@ try (InputStream input = Files.newInputStream(Paths.get("D:/temp/demo.pdf"));
 | 图片 | `png`、`jpg`、`jpeg`、`bmp` | 直接绘制到图片像素 |
 | Excel | `xlsx` | 生成透明 PNG 水印图并嵌入工作表 |
 | Word | `docx` | 写入页眉 VML 水印 |
-| PDF | `pdf` | 使用 Apache PDFBox 追加文本水印 |
+| PDF | `pdf` | 生成透明水印图层并使用 Apache PDFBox 叠加到页面 |
 
 ## 实现说明
 
@@ -242,9 +242,9 @@ Word 水印写入页眉层中的 VML 形状。这样可以让水印位于页面�
 
 ### PDF 水印
 
-PDF 水印基于 Apache PDFBox 实现，不依赖 iText。中文水印依赖 PDFBox 能够成功加载可嵌入的中文字体。
+PDF 水印基于 Apache PDFBox 实现，不依赖 iText。当前实现会先使用 AWT 和配置字体生成透明水印图层，再把图层叠加到 PDF 页面上。
 
-如果字体加载失败并回退到 Helvetica，中文字符可能无法写入。建议使用 PDFBox 可加载的中文 TrueType 字体。
+这种方式不依赖 PDFBox 直接嵌入中文字体，可以规避部分 OTF 中文字体无法通过 `PDType0Font` 写入文本的问题。代价是 PDF 水印本身是图片图层，不是可选中的 PDF 文本。
 
 ## 本地文件测试
 
@@ -344,7 +344,7 @@ Word 的水印通常由页眉中的 VML 形状承载。这样可以让水印位�
 <details>
 <summary>PDF 中文水印报字体错误怎么办？</summary>
 
-PDFBox 写入中文文本时需要字体本身支持对应字符，并且字体可以被 PDFBox 正确加载。建议配置可嵌入的中文 TrueType 字体，并通过 `watermark.font-path` 指向该字体。
+当前 PDF 水印通过透明图片图层写入，不再直接调用 PDFBox 的中文文本写入能力。如果仍然出现中文显示异常，请优先确认 `watermark.font-path` 指向的字体能被 Java AWT 正常加载，并且字体本身包含对应中文字符。
 </details>
 
 <details>
@@ -405,7 +405,7 @@ mvn clean package
 
 ## 后续规划
 
-- 增强 PDF 中文字体加载失败时的错误提示
+- 优化 PDF 水印图层缓存和文件体积
 - 支持 `.xls` 和 `.doc`
 - 支持更多水印布局策略
 - 支持按文件类型单独定制水印参数
