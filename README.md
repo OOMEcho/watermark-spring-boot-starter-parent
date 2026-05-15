@@ -96,6 +96,8 @@ watermark:
   rotation: 45
   position: DIAGONAL
   font-path: classpath:/fonts/SourceHanSerifSC-Regular.otf
+  excel-protect-sheet: true
+  excel-protect-password: watermark
 ```
 
 ### 4. 注入服务使用
@@ -131,6 +133,8 @@ public class FileWatermarkService {
 | `watermark.rotation` | `45` | 水印旋转角度 |
 | `watermark.position` | `DIAGONAL` | 水印位置 |
 | `watermark.font-path` | `classpath:/fonts/SourceHanSerifSC-Regular.otf` | 字体路径 |
+| `watermark.excel-protect-sheet` | `true` | Excel 水印写入后是否保护工作表 |
+| `watermark.excel-protect-password` | `watermark` | Excel 工作表保护密码；仅在未保护的工作表上生效 |
 
 字体路径支持以下形式：
 
@@ -162,6 +166,8 @@ public enum WatermarkPosition {
 | `BOTTOM_LEFT` | 左下角单个水印 |
 | `BOTTOM_RIGHT` | 右下角单个水印 |
 | `DIAGONAL` | 斜向平铺水印 |
+
+说明：图片、Excel、PDF 的 `DIAGONAL` 会生成斜向平铺水印。Word 基于页眉 VML 水印实现，`DIAGONAL` 按居中旋转页眉水印处理，不做全页多对象平铺；其他位置会映射到页眉相对页边距的对应方位。
 
 ## 核心 API
 
@@ -238,15 +244,23 @@ Excel 水印通过生成透明 PNG 水印图并嵌入工作表实现。当前实
 
 Excel 是可编辑文档格式，不能把这种方式理解为严格的防篡改能力。
 
+默认会保护未受保护的工作表；如果原工作表已经处于保护状态，处理器不会覆盖原有保护密码。可以通过 `watermark.excel-protect-sheet=false` 关闭自动保护。对于超大工作表，水印 PNG 会自动限制渲染尺寸，减少内存占用和输出文件体积。
+
 ### Word 水印
 
 Word 水印写入页眉层中的 VML 形状。这样可以让水印位于页面背景层，减少对正文布局的影响，也更接近 Word 原生水印机制。
+
+Word 的页眉 VML 水印会使用配置字体路径解析出的字体族；如果字体不可用，会回退到默认中文字体族。受 Word 页眉水印模型限制，`DIAGONAL` 在 Word 中表示居中旋转页眉水印，不等同于图片、Excel、PDF 的斜向平铺。
+
+多节 Word 文档会按每个 section 尝试写入页眉水印；只有完全无法写入页眉水印时，才会回退为正文浅色文本水印。
 
 ### PDF 水印
 
 PDF 水印基于 Apache PDFBox 实现，不依赖 iText。当前实现会先使用 AWT 和配置字体生成透明水印图层，再把图层叠加到 PDF 页面上。
 
 这种方式不依赖 PDFBox 直接嵌入中文字体，可以规避部分 OTF 中文字体无法通过 `PDType0Font` 写入文本的问题。代价是 PDF 水印本身是图片图层，不是可选中的 PDF 文本。
+
+PDF 会按页面 `CropBox` 和页面旋转角绘制到可见区域。对于大幅面 PDF，水印图片会自动限制渲染尺寸，避免生成过大的中间图片。
 
 ## 本地文件测试
 
