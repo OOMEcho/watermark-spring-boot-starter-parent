@@ -2,6 +2,8 @@ package com.watermark.core.handler;
 
 import com.watermark.core.WatermarkHandler;
 import com.watermark.core.WatermarkOptions;
+import com.watermark.core.WatermarkPosition;
+import com.watermark.core.font.WatermarkFontLoader;
 import org.apache.xmlbeans.XmlCursor;
 import org.apache.poi.xwpf.model.XWPFHeaderFooterPolicy;
 import org.apache.poi.xwpf.usermodel.XWPFHeader;
@@ -12,8 +14,11 @@ import org.apache.poi.xwpf.usermodel.XWPFRun;
 import org.openxmlformats.schemas.wordprocessingml.x2006.main.CTSectPr;
 
 import javax.xml.namespace.QName;
+import java.awt.Font;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 
 /**
@@ -43,6 +48,24 @@ public class WordWatermarkHandler implements WatermarkHandler {
     private static final String SHAPE_LOCAL_NAME = "shape";
     private static final String TEXT_PATH_LOCAL_NAME = "textpath";
 
+    private final WatermarkFontLoader fontLoader;
+
+    /**
+     * 使用默认字体加载器创建 DOCX 处理器。
+     */
+    public WordWatermarkHandler() {
+        this(new WatermarkFontLoader());
+    }
+
+    /**
+     * 使用共享字体加载器创建 DOCX 处理器。
+     *
+     * @param fontLoader 用于解析配置字体路径的字体加载器
+     */
+    public WordWatermarkHandler(WatermarkFontLoader fontLoader) {
+        this.fontLoader = fontLoader == null ? new WatermarkFontLoader() : fontLoader;
+    }
+
     @Override
     public boolean supports(String fileName) {
         // 当前实现依赖 XWPF API，因此只支持 DOCX，不支持旧版 HWPF/DOC。
@@ -53,10 +76,11 @@ public class WordWatermarkHandler implements WatermarkHandler {
     public void addWatermark(InputStream input, OutputStream output, String fileName, WatermarkOptions options) throws Exception {
         // 处理器可能绕过 DefaultWatermarkService 直接使用，因此这里仍需归一化参数。
         WatermarkOptions normalized = (options == null ? new WatermarkOptions() : options).normalize();
+        String fontFamily = resolveFontFamily(normalized);
         // XWPFDocument 持有 OPC 包资源，写出后必须关闭。
         try (XWPFDocument document = new XWPFDocument(input)) {
             // 优先使用 Word 原生页眉水印，避免影响正文布局。
-            addHeaderWatermark(document, normalized);
+            addHeaderWatermark(document, normalized, fontFamily);
             // 水印插入后统一写出一次，保持 DOCX 包结构一致。
             document.write(output);
         }
@@ -64,26 +88,54 @@ public class WordWatermarkHandler implements WatermarkHandler {
 
     /**
      * 尽可能添加 Word 原生页眉水印，不兼容文档则回退为正文浅色文本水印。
+     * 多 section 文档会逐个 section 尝试，只有全部失败时才回退正文水印。
      *
      * @param document 目标 DOCX 文档
      * @param options 已归一化的水印参数
+     * @param fontFamily Word 水印使用的字体族名称
      */
-    private void addHeaderWatermark(XWPFDocument document, WatermarkOptions options) {
-        try {
-            // Word 页眉水印依赖节属性；仅在文档缺失时创建，避免覆盖既有结构。
-            CTSectPr sectPr = document.getDocument().getBody().isSetSectPr()
-                    ? document.getDocument().getBody().getSectPr()
-                    : document.getDocument().getBody().addNewSectPr();
-            // POI 的页眉页脚策略封装了 Word 期望的 VML 水印结构。
-            XWPFHeaderFooterPolicy policy = new XWPFHeaderFooterPolicy(document, sectPr);
-            // 跨库调用只负责创建页眉关系和 VML 骨架，后续必须修正中文和样式。
-            policy.createWatermark(options.getText());
-            // POI 默认水印对中文和样式控制不足，因此创建骨架后立即修正 VML 属性。
-            rewriteHeaderWatermark(policy, options);
-        } catch (Exception ignored) {
-            // 部分异常或极简 DOCX 会拒绝页眉修改；回退可保证 API 尽力完成水印处理。
-            addTextWatermark(document, options);
+    private void addHeaderWatermark(XWPFDocument document, WatermarkOptions options, String fontFamily) {
+        boolean addedHeaderWatermark = false;
+        for (CTSectPr sectPr : sectionProperties(document)) {
+            try {
+                // POI 的页眉页脚策略封装了 Word 期望的 VML 水印结构。
+                XWPFHeaderFooterPolicy policy = new XWPFHeaderFooterPolicy(document, sectPr);
+                // 跨库调用只负责创建页眉关系和 VML 骨架，后续必须修正中文和样式。
+                policy.createWatermark(options.getText());
+                // POI 默认水印对中文和样式控制不足，因此创建骨架后立即修正 VML 属性。
+                rewriteHeaderWatermark(policy, options, fontFamily);
+                addedHeaderWatermark = true;
+            } catch (Exception ignored) {
+                // 单个 section 写入失败不应影响其他 section；是否兜底由最终成功数决定。
+            }
         }
+        if (!addedHeaderWatermark) {
+            // 部分异常或极简 DOCX 会拒绝页眉修改；回退可保证 API 尽力完成水印处理。
+            addTextWatermark(document, options, fontFamily);
+        }
+    }
+
+    /**
+     * 收集文档中的所有节属性，用于覆盖多 section Word 文档。
+     * 包含段落级 section 和 body 级 section；不存在时创建 body 级 section。
+     *
+     * @param document 目标 DOCX 文档
+     * @return 至少包含一个节属性的列表
+     */
+    private List<CTSectPr> sectionProperties(XWPFDocument document) {
+        List<CTSectPr> sections = new ArrayList<CTSectPr>();
+        for (XWPFParagraph paragraph : document.getParagraphs()) {
+            if (paragraph.getCTP().isSetPPr() && paragraph.getCTP().getPPr().isSetSectPr()) {
+                sections.add(paragraph.getCTP().getPPr().getSectPr());
+            }
+        }
+        if (document.getDocument().getBody().isSetSectPr()) {
+            sections.add(document.getDocument().getBody().getSectPr());
+        }
+        if (sections.isEmpty()) {
+            sections.add(document.getDocument().getBody().addNewSectPr());
+        }
+        return sections;
     }
 
     /**
@@ -91,12 +143,13 @@ public class WordWatermarkHandler implements WatermarkHandler {
      *
      * @param policy 已创建水印的页眉页脚策略
      * @param options 已归一化的水印参数
+     * @param fontFamily Word 水印使用的字体族名称
      */
-    private void rewriteHeaderWatermark(XWPFHeaderFooterPolicy policy, WatermarkOptions options) {
+    private void rewriteHeaderWatermark(XWPFHeaderFooterPolicy policy, WatermarkOptions options, String fontFamily) {
         // createWatermark 会创建默认页、首页和偶数页页眉，必须逐个修正才能覆盖所有页面类型。
-        rewriteHeaderWatermark(policy.getDefaultHeader(), options);
-        rewriteHeaderWatermark(policy.getFirstPageHeader(), options);
-        rewriteHeaderWatermark(policy.getEvenPageHeader(), options);
+        rewriteHeaderWatermark(policy.getDefaultHeader(), options, fontFamily);
+        rewriteHeaderWatermark(policy.getFirstPageHeader(), options, fontFamily);
+        rewriteHeaderWatermark(policy.getEvenPageHeader(), options, fontFamily);
     }
 
     /**
@@ -104,8 +157,9 @@ public class WordWatermarkHandler implements WatermarkHandler {
      *
      * @param header 目标页眉
      * @param options 已归一化的水印参数
+     * @param fontFamily Word 水印使用的字体族名称
      */
-    private void rewriteHeaderWatermark(XWPFHeader header, WatermarkOptions options) {
+    private void rewriteHeaderWatermark(XWPFHeader header, WatermarkOptions options, String fontFamily) {
         if (header == null) {
             return;
         }
@@ -121,7 +175,7 @@ public class WordWatermarkHandler implements WatermarkHandler {
                     }
                     if (isLocalName(name, TEXT_PATH_LOCAL_NAME) && cursor.getAttributeText(new QName("string")) != null) {
                         // textpath 节点承载实际水印文字，必须写入正确中文并指定中文字体。
-                        rewriteTextPath(cursor, options);
+                        rewriteTextPath(cursor, options, fontFamily);
                     }
                 }
             }
@@ -174,12 +228,13 @@ public class WordWatermarkHandler implements WatermarkHandler {
      *
      * @param cursor 当前定位在 v:textpath 开始节点的游标
      * @param options 已归一化的水印参数
+     * @param fontFamily Word 水印使用的字体族名称
      */
-    private void rewriteTextPath(XmlCursor cursor, WatermarkOptions options) {
+    private void rewriteTextPath(XmlCursor cursor, WatermarkOptions options, String fontFamily) {
         // 直接写入 Java 字符串，XMLBeans 会负责属性转义并保留中文。
         cursor.setAttributeText(new QName("string"), options.getText());
         // 指定中文字体族并让 VML 按 shape 拉伸文字，这是 Word 水印常见写法。
-        cursor.setAttributeText(new QName("style"), "font-family:'" + FONT_FAMILY + "';font-size:1pt");
+        cursor.setAttributeText(new QName("style"), "font-family:'" + fontFamily + "';font-size:1pt");
         // textpath 必须开启，否则部分 Word 版本不会显示 VML 文字。
         cursor.setAttributeText(new QName("on"), "t");
         cursor.setAttributeText(new QName("fitshape"), "t");
@@ -203,10 +258,42 @@ public class WordWatermarkHandler implements WatermarkHandler {
                 "rotation:" + rotation + ";" +
                 "z-index:-251654144;" +
                 "mso-wrap-edited:f;" +
-                "mso-position-horizontal:center;" +
+                "mso-position-horizontal:" + horizontalPosition(options.getPosition()) + ";" +
                 "mso-position-horizontal-relative:margin;" +
-                "mso-position-vertical:center;" +
+                "mso-position-vertical:" + verticalPosition(options.getPosition()) + ";" +
                 "mso-position-vertical-relative:margin";
+    }
+
+    /**
+     * 将通用位置映射为 Word VML 支持的水平定位。
+     *
+     * @param position 通用水印位置
+     * @return VML 水平定位值
+     */
+    private String horizontalPosition(WatermarkPosition position) {
+        if (position == WatermarkPosition.TOP_LEFT || position == WatermarkPosition.BOTTOM_LEFT) {
+            return "left";
+        }
+        if (position == WatermarkPosition.TOP_RIGHT || position == WatermarkPosition.BOTTOM_RIGHT) {
+            return "right";
+        }
+        return "center";
+    }
+
+    /**
+     * 将通用位置映射为 Word VML 支持的垂直定位。
+     *
+     * @param position 通用水印位置
+     * @return VML 垂直定位值
+     */
+    private String verticalPosition(WatermarkPosition position) {
+        if (position == WatermarkPosition.TOP_LEFT || position == WatermarkPosition.TOP_RIGHT) {
+            return "top";
+        }
+        if (position == WatermarkPosition.BOTTOM_LEFT || position == WatermarkPosition.BOTTOM_RIGHT) {
+            return "bottom";
+        }
+        return "center";
     }
 
     /**
@@ -239,8 +326,9 @@ public class WordWatermarkHandler implements WatermarkHandler {
      *
      * @param document 目标 DOCX 文档
      * @param options 已归一化的水印参数
+     * @param fontFamily Word 水印使用的字体族名称
      */
-    private void addTextWatermark(XWPFDocument document, WatermarkOptions options) {
+    private void addTextWatermark(XWPFDocument document, WatermarkOptions options, String fontFamily) {
         // 插入兜底文本需要段落作为锚点；空文档必须先创建段落。
         if (document.getParagraphs().isEmpty()) {
             document.createParagraph();
@@ -260,10 +348,28 @@ public class WordWatermarkHandler implements WatermarkHandler {
         XWPFRun run = watermarkParagraph.createRun();
         run.setText(options.getText());
         // 使用内置字体的字体族名称；实际显示仍取决于 Word 查看环境是否有该字体。
-        run.setFontFamily(FONT_FAMILY);
+        run.setFontFamily(fontFamily);
         run.setFontSize(options.getFontSize());
         // Word run 颜色不支持 alpha，因此通过向白色混合来近似配置透明度。
         run.setColor(fadeColor(options));
+    }
+
+    /**
+     * 根据配置字体路径解析 Word 可写入的字体族名称。
+     *
+     * @param options 已归一化的水印参数
+     * @return 字体族名称；无法解析时使用历史默认字体族
+     */
+    private String resolveFontFamily(WatermarkOptions options) {
+        try {
+            Font font = fontLoader.loadAwtFont(options);
+            if (font != null && font.getFamily() != null && !font.getFamily().trim().isEmpty()) {
+                return font.getFamily(Locale.ROOT);
+            }
+        } catch (Exception ignored) {
+            // 字体解析失败不应阻断 Word 水印写入，保留原有默认字体族兜底。
+        }
+        return FONT_FAMILY;
     }
 
     /**

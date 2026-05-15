@@ -8,7 +8,7 @@ import lombok.NoArgsConstructor;
 import java.awt.Color;
 
 /**
- * 水印参数对象，承载文字、透明度、字体、颜色、旋转角度和位置等通用配置。
+ * 水印参数对象，承载文字、透明度、字体、颜色、旋转角度、位置和 Excel 保护策略等通用配置。
  *
  * @author xuesong.lei
  * @since 2026/05/14
@@ -26,6 +26,8 @@ public class WatermarkOptions {
     public static final String DEFAULT_COLOR = "GRAY";
     public static final float DEFAULT_ROTATION = 45f;
     public static final WatermarkPosition DEFAULT_POSITION = WatermarkPosition.DIAGONAL;
+    public static final boolean DEFAULT_EXCEL_PROTECT_SHEET = true;
+    public static final String DEFAULT_EXCEL_PROTECT_PASSWORD = "watermark";
     private static final float MIN_OPACITY = 0f;
     private static final float MAX_OPACITY = 1f;
 
@@ -49,6 +51,12 @@ public class WatermarkOptions {
 
     @Builder.Default
     private String fontPath = DEFAULT_FONT_PATH;
+
+    @Builder.Default
+    private Boolean excelProtectSheet = DEFAULT_EXCEL_PROTECT_SHEET;
+
+    @Builder.Default
+    private String excelProtectPassword = DEFAULT_EXCEL_PROTECT_PASSWORD;
 
     /**
      * 将面向用户的颜色配置转换为图片和文档渲染器可使用的 AWT 颜色。
@@ -76,11 +84,17 @@ public class WatermarkOptions {
         // 空颜色按缺省配置处理；格式错误的颜色再交由解析器兜底。
         options.setColor(color == null || color.trim().isEmpty() ? DEFAULT_COLOR : color);
         // 默认旋转角适合斜向水印，并被所有内置处理器共同使用。
-        options.setRotation(rotation == null ? DEFAULT_ROTATION : rotation);
+        options.setRotation(normalizeRotation(rotation));
         // 位置在这里归一化，因为处理器内部假设一定存在具体位置策略。
         options.setPosition(position == null ? DEFAULT_POSITION : position);
         // 字体路径兜底保证用户未配置时仍能使用内置中文字体。
         options.setFontPath(fontPath == null || fontPath.trim().isEmpty() ? DEFAULT_FONT_PATH : fontPath);
+        // Excel 保护策略默认保持历史行为，但允许调用方显式关闭。
+        options.setExcelProtectSheet(excelProtectSheet == null ? DEFAULT_EXCEL_PROTECT_SHEET : excelProtectSheet);
+        // 空密码没有明确业务语义，按默认密码兜底可避免生成不可预期保护配置。
+        options.setExcelProtectPassword(excelProtectPassword == null || excelProtectPassword.trim().isEmpty()
+                ? DEFAULT_EXCEL_PROTECT_PASSWORD
+                : excelProtectPassword);
         return options;
     }
 
@@ -95,6 +109,10 @@ public class WatermarkOptions {
         if (value == null) {
             return DEFAULT_OPACITY;
         }
+        // NaN 或无穷值无法被 AWT/PDF 渲染器可靠处理，应回落默认配置。
+        if (value.isNaN() || value.isInfinite()) {
+            return DEFAULT_OPACITY;
+        }
         // 负数透明度对 AWT/PDF 渲染器非法；裁剪比直接失败更符合配置容错预期。
         if (value < MIN_OPACITY) {
             return MIN_OPACITY;
@@ -102,6 +120,19 @@ public class WatermarkOptions {
         // 大于 1 的透明度对 AWT/PDF 渲染器非法；裁剪到 1 可保留可见水印。
         if (value > MAX_OPACITY) {
             return MAX_OPACITY;
+        }
+        return value;
+    }
+
+    /**
+     * 将旋转角归一化为可渲染的有限浮点值。
+     *
+     * @param value 用户传入的旋转角
+     * @return 可被各格式处理器安全使用的旋转角
+     */
+    private Float normalizeRotation(Float value) {
+        if (value == null || value.isNaN() || value.isInfinite()) {
+            return DEFAULT_ROTATION;
         }
         return value;
     }

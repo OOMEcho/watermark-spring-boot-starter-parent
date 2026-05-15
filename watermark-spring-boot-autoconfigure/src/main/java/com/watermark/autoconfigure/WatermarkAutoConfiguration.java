@@ -70,13 +70,14 @@ public class WatermarkAutoConfiguration {
     /**
      * 在业务项目未提供自定义实现时注册 DOCX 处理器。
      *
+     * @param fontLoader 共享字体加载器 Bean
      * @return Word 水印处理器
      */
     @Bean
     @ConditionalOnMissingBean(WordWatermarkHandler.class)
-    public WordWatermarkHandler wordWatermarkHandler() {
-        // Word 使用 POI 页眉水印能力，不需要共享的 AWT/PDF 字体加载器。
-        return new WordWatermarkHandler();
+    public WordWatermarkHandler wordWatermarkHandler(WatermarkFontLoader fontLoader) {
+        // Word 页眉水印需要从配置字体路径中解析字体族名称，因此复用同一套字体加载策略。
+        return new WordWatermarkHandler(fontLoader);
     }
 
     /**
