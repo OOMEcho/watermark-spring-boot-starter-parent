@@ -10,7 +10,7 @@
 [![PDFBox](https://img.shields.io/badge/PDF-Apache%20PDFBox-red.svg)](https://pdfbox.apache.org/)
 [![POI](https://img.shields.io/badge/Office-Apache%20POI-yellow.svg)](https://poi.apache.org/)
 
-## 🍟 如果您觉得有帮助，请点右上角 "Star" 支持一下谢谢
+## 🍟 如果你觉得有帮助，请点右上角 "Star" 支持一下谢谢
 
 </div>
 
@@ -24,7 +24,7 @@
 
 - 文件下载前追加水印
 - 内部文档流转增加标识
-- 图片、Office、PDF 文件批量加水印
+- 图片、`.xlsx`、`.docx`、PDF 文件批量加水印
 - SaaS 系统按租户、用户、时间动态生成水印
 - 后台管理系统导出文件时增加追踪信息
 
@@ -39,6 +39,7 @@
 - 支持按文件名自动识别处理器
 - 支持字节数组和流式处理
 - 支持水印文字、透明度、字号、颜色、旋转角度、位置配置
+- 不支持旧版 Office 二进制格式 `.xls` 和 `.doc`
 - Excel 默认锁定水印图片并保护工作表，降低水印被误删或拖动的概率
 
 ## 模块结构
@@ -220,8 +221,10 @@ try (InputStream input = Files.newInputStream(Paths.get("D:/temp/demo.pdf"));
 |---|---|---|
 | 图片 | `png`、`jpg`、`jpeg`、`bmp` | 直接绘制到图片像素 |
 | Excel | `xlsx` | 生成透明 PNG 水印图并嵌入工作表 |
-| Word | `docx` | 写入页眉 VML 水印 |
+| Word | `docx` | 写入页眉层水印，减少对正文排版的影响 |
 | PDF | `pdf` | 生成透明水印图层并使用 Apache PDFBox 叠加到页面 |
+
+不支持旧版 Office 二进制格式 `.xls` 和 `.doc`，也不计划支持。请在调用前将文件转换为 `.xlsx` 或 `.docx`。
 
 ## 实现说明
 
@@ -406,6 +409,6 @@ mvn clean package
 
 <div align="center">
 
-**如果这个项目对您有帮助，请给它一个 ⭐ Star！**
+**如果这个项目对你有帮助，请给它一个 ⭐ Star！**
 
 </div>
